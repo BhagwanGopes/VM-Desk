@@ -7,8 +7,8 @@ final class VMManager: NSObject, ObservableObject {
     @Published private(set) var state: VMState = .stopped
     @Published private(set) var errorMessage: String?
 
-    private var virtualMachine: VZVirtualMachine?
-    private let config: VMConfig
+    private(set) var virtualMachine: VZVirtualMachine?
+    let config: VMConfig
 
     enum VMState {
         case stopped
