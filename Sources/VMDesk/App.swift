@@ -1,5 +1,13 @@
 import SwiftUI
 import Virtualization
+import AppKit
+import UniformTypeIdentifiers
+
+// MARK: - ISO File Type Extension
+
+extension UTType {
+    static let iso = UTType(filenameExtension: "iso")!
+}
 
 @main
 struct VMDeskApp: App {
@@ -95,11 +103,24 @@ struct ContentView: View {
         let diskPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("test-\(UUID().uuidString).img")
 
+        // Show file picker for optional ISO selection
+        let panel = NSOpenPanel()
+        panel.message = "Select an ISO file (optional)"
+        panel.allowedContentTypes = [.iso]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        var cdromPath: URL? = nil
+        if panel.runModal() == .OK {
+            cdromPath = panel.url
+        }
+
         let config = VMConfig(
             name: "Test VM \(library.vms.count + 1)",
             cpuCount: 2,
             memorySize: 2 * 1024 * 1024 * 1024,
-            diskImagePath: diskPath
+            diskImagePath: diskPath,
+            cdromImagePath: cdromPath
         )
 
         library.addVM(config)
@@ -124,6 +145,9 @@ struct VMDetailView: View {
                 DetailRow(label: "CPU", value: "\(vm.cpuCount) cores")
                 DetailRow(label: "Memory", value: "\(vm.memorySize / 1024 / 1024 / 1024) GB")
                 DetailRow(label: "Disk", value: vm.diskImagePath.lastPathComponent)
+                if let cdromPath = vm.cdromImagePath {
+                    DetailRow(label: "CD-ROM", value: cdromPath.lastPathComponent)
+                }
                 DetailRow(label: "Network", value: vm.networkingMode.rawValue.uppercased())
                 DetailRow(label: "Mode", value: vm.isolationMode.rawValue.capitalized)
             }

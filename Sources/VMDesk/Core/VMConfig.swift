@@ -8,6 +8,7 @@ struct VMConfig: Codable, Identifiable {
     var cpuCount: Int
     var memorySize: UInt64
     var diskImagePath: URL
+    var cdromImagePath: URL?
     var bootLoaderType: BootLoaderType
     var networkingMode: NetworkingMode
     var isolationMode: IsolationMode
@@ -33,6 +34,7 @@ struct VMConfig: Codable, Identifiable {
         cpuCount: Int,
         memorySize: UInt64,
         diskImagePath: URL,
+        cdromImagePath: URL? = nil,
         bootLoaderType: BootLoaderType = .linux,
         networkingMode: NetworkingMode = .nat,
         isolationMode: IsolationMode = .isolated
@@ -42,6 +44,7 @@ struct VMConfig: Codable, Identifiable {
         self.cpuCount = cpuCount
         self.memorySize = memorySize
         self.diskImagePath = diskImagePath
+        self.cdromImagePath = cdromImagePath
         self.bootLoaderType = bootLoaderType
         self.networkingMode = networkingMode
         self.isolationMode = isolationMode
@@ -82,7 +85,22 @@ final class VMConfigurationBuilder {
             readOnly: false
         )
         let blockDevice = VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)
-        vzConfig.storageDevices = [blockDevice]
+
+        var storageDevices: [VZStorageDeviceConfiguration] = [blockDevice]
+
+        // CD-ROM attachment (if ISO provided)
+        if let cdromPath = config.cdromImagePath {
+            if FileManager.default.fileExists(atPath: cdromPath.path) {
+                let cdromAttachment = try VZDiskImageStorageDeviceAttachment(
+                    url: cdromPath,
+                    readOnly: true
+                )
+                let cdromDevice = VZUSBMassStorageDeviceConfiguration(attachment: cdromAttachment)
+                storageDevices.append(cdromDevice)
+            }
+        }
+
+        vzConfig.storageDevices = storageDevices
 
         // Boot loader
         switch config.bootLoaderType {
