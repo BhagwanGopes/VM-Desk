@@ -11,6 +11,9 @@ let package = Package(
         .executableTarget(
             name: "VMDesk",
             path: "Sources/VMDesk",
+            resources: [
+                .process("Display/Shaders.metal")
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
             ]
