@@ -50,19 +50,44 @@ final class VMManager: NSObject, ObservableObject {
         }
 
         state = .starting
+        errorMessage = nil
 
         do {
+            // Build VM configuration
             let vzConfig = try VMConfigurationBuilder.build(from: config)
+
+            // Validate before creating VM
+            try vzConfig.validate()
+
+            // Create and configure VM
             let vm = VZVirtualMachine(configuration: vzConfig)
             vm.delegate = self
             self.virtualMachine = vm
 
+            // Start VM
             try await vm.start()
             state = .running
+        } catch let error as VMConfigurationBuilder.BuildError {
+            state = .error
+            errorMessage = formatBuildError(error)
+            throw VMError.startFailed(underlying: error)
         } catch {
             state = .error
-            errorMessage = error.localizedDescription
+            errorMessage = "VM failed to start: \(error.localizedDescription)"
             throw VMError.startFailed(underlying: error)
+        }
+    }
+
+    private func formatBuildError(_ error: VMConfigurationBuilder.BuildError) -> String {
+        switch error {
+        case .invalidCPUCount:
+            return "Invalid CPU count. Must be between 1 and \(VZVirtualMachineConfiguration.maximumAllowedCPUCount)"
+        case .invalidMemorySize:
+            return "Invalid memory size. Must be between 1 GB and \(VZVirtualMachineConfiguration.maximumAllowedMemorySize / 1024 / 1024 / 1024) GB"
+        case .diskImageNotFound:
+            return "Disk image not found. Please check the disk path."
+        case .unsupportedConfiguration:
+            return "Unsupported configuration. Some features are not available on this system."
         }
     }
 

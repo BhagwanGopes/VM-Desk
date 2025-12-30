@@ -47,83 +47,93 @@ struct VMDeskApp: App {
 struct ContentView: View {
     @ObservedObject var library: VMLibrary
     @State private var selectedVM: UUID?
+    @State private var showingCreationWizard = false
 
     var body: some View {
+        navigationView
+            .frame(minWidth: 800, minHeight: 600)
+            .sheet(isPresented: $showingCreationWizard) {
+                VMCreationWizard(library: library)
+            }
+    }
+
+    private var navigationView: some View {
         NavigationSplitView {
-            List(library.vms, selection: $selectedVM) { vm in
-                VStack(alignment: .leading) {
-                    Text(vm.name)
-                        .font(.headline)
-                    HStack {
-                        Text("\(vm.cpuCount) CPUs, \(vm.memorySize / 1024 / 1024 / 1024) GB RAM")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        if library.runningVMs[vm.id] != nil {
-                            Circle()
-                                .fill(.green)
-                                .frame(width: 8, height: 8)
-                        }
-                    }
-                }
-                .tag(vm.id)
-            }
-            .navigationTitle("Virtual Machines")
-            .toolbar {
-                Button(action: createTestVM) {
-                    Label("Add VM", systemImage: "plus")
-                }
-            }
+            vmListView
         } detail: {
+            detailView
+        }
+    }
+
+    private var vmListView: some View {
+        List(library.vms, selection: $selectedVM) { vm in
+            VMListRow(vm: vm, isRunning: library.runningVMs[vm.id] != nil)
+                .tag(vm.id)
+        }
+        .navigationTitle("Virtual Machines")
+        .toolbar {
+            toolbarContent
+        }
+    }
+
+    private var detailView: some View {
+        Group {
             if let selectedVM = selectedVM,
                let vm = library.vms.first(where: { $0.id == selectedVM }) {
                 VMDetailView(vm: vm, library: library)
             } else {
-                VStack {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 64))
-                        .foregroundColor(.secondary)
-                    Text("No VM Selected")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
-                    Text("Create a new virtual machine to get started")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                emptyStateView
+            }
+        }
+    }
+
+    private var emptyStateView: some View {
+        VStack {
+            Image(systemName: "desktopcomputer")
+                .font(.system(size: 64))
+                .foregroundColor(.secondary)
+            Text("No VM Selected")
+                .font(.title2)
+                .foregroundColor(.secondary)
+            Text("Create a new virtual machine to get started")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem {
+            Button(action: { showingCreationWizard = true }) {
+                Label("Add VM", systemImage: "plus")
+            }
+        }
+    }
+}
+
+/// VM list row view
+struct VMListRow: View {
+    let vm: VMConfig
+    let isRunning: Bool
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(vm.name)
+                .font(.headline)
+            HStack {
+                Text("\(vm.cpuCount) CPUs, \(vm.memorySize / 1024 / 1024 / 1024) GB RAM")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                if isRunning {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
                 }
             }
         }
-        .frame(minWidth: 800, minHeight: 600)
-    }
-
-    private func createTestVM() {
-        // Create a test VM config
-        // TODO: Replace with proper VM creation wizard
-        let diskPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("test-\(UUID().uuidString).img")
-
-        // Show file picker for optional ISO selection
-        let panel = NSOpenPanel()
-        panel.message = "Select an ISO file (optional)"
-        panel.allowedContentTypes = [.iso]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        var cdromPath: URL? = nil
-        if panel.runModal() == .OK {
-            cdromPath = panel.url
-        }
-
-        let config = VMConfig(
-            name: "Test VM \(library.vms.count + 1)",
-            cpuCount: 2,
-            memorySize: 2 * 1024 * 1024 * 1024,
-            diskImagePath: diskPath,
-            cdromImagePath: cdromPath
-        )
-
-        library.addVM(config)
     }
 }
 
@@ -131,6 +141,7 @@ struct ContentView: View {
 struct VMDetailView: View {
     let vm: VMConfig
     @ObservedObject var library: VMLibrary
+    @State private var showingError = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -176,7 +187,11 @@ struct VMDetailView: View {
             } else {
                 Button("Start VM") {
                     Task {
-                        try? await library.startVM(id: vm.id)
+                        do {
+                            try await library.startVM(id: vm.id)
+                        } catch {
+                            showingError = true
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -184,6 +199,14 @@ struct VMDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .alert("VM Error", isPresented: $showingError, presenting: library.lastError) { _ in
+            Button("OK") {
+                showingError = false
+                library.lastError = nil
+            }
+        } message: { error in
+            Text(error)
+        }
     }
 }
 
@@ -207,6 +230,7 @@ struct DetailRow: View {
 final class VMLibrary: ObservableObject {
     @Published var vms: [VMConfig] = []
     @Published var runningVMs: [UUID: VMManager] = [:]
+    @Published var lastError: String?
 
     func addVM(_ config: VMConfig) {
         vms.append(config)
@@ -216,12 +240,14 @@ final class VMLibrary: ObservableObject {
         guard let config = vms.first(where: { $0.id == id }) else { return }
         guard runningVMs[id] == nil else { return }
 
+        lastError = nil
         let manager = VMManager(config: config)
         runningVMs[id] = manager
 
         do {
             try await manager.start()
         } catch {
+            lastError = manager.errorMessage ?? error.localizedDescription
             runningVMs.removeValue(forKey: id)
             throw error
         }
@@ -230,7 +256,12 @@ final class VMLibrary: ObservableObject {
     func stopVM(id: UUID) async throws {
         guard let manager = runningVMs[id] else { return }
 
-        try await manager.stop()
-        runningVMs.removeValue(forKey: id)
+        do {
+            try await manager.stop()
+            runningVMs.removeValue(forKey: id)
+        } catch {
+            lastError = manager.errorMessage ?? error.localizedDescription
+            throw error
+        }
     }
 }
